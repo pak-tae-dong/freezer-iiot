@@ -8,18 +8,21 @@ BROKER = "localhost"
 PORT = 1883
 TOPIC = "lab/freezer1/T_box"
 
+# ค่าปลอมไปก่อน → วันศุกร์เปลี่ยนเป็นอ่าน D0–D7 ผ่าน FINS/TCP
+def read_plc():
+	return -18.2
+
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 client.connect(BROKER, PORT, 60)
 client.loop_start()
 
 try:
 	while True:
-		value = -18.2
 		ts = datetime.now().astimezone().isoformat(timespec="seconds")
 
 		payload = {
 			"ts" : ts,
-			"value" : value,
+			"value" : read_plc(),
 			"unit" : "degC",
 			"q" : "good"
 		}
