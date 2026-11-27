@@ -3,7 +3,8 @@
 รัน: python fake_plc.py   (หยุดด้วย Ctrl+C)
 - รับ client ได้หลายตัวพร้อมกัน (sim.py + edge.py)
 - มี DM 100 word: D2 = -180 (setpoint), D3 = 25 (band), D5 = heartbeat +1 ทุกวินาที
-- ไม่มี Ladder: ไม่คุมคอม ไม่มี watchdog
+- จำลอง Ladder แบบย่อ: on/off ตาม D0 เทียบ D2 ± D3/2 -> D4, watchdog D6 ไม่เปลี่ยน 10 วิ -> D7
+  (ไม่มีเวลาหน่วงก่อนสตาร์ตคอม และไม่มี fallback duty - ของพวกนี้ทดสอบบน CP1L จริง)
 """
 import socket
 import struct
@@ -27,6 +28,23 @@ def heartbeat():
         time.sleep(1)
         with lock:
             dm[5] = (dm[5] + 1) & 0x7FFF
+
+
+def ladder():
+    # on/off + self-hold เหมือน rung ข้อ 1 ของ Ladder จริง (ไม่มี anti-short-cycle)
+    last_d6, same_since = None, time.time()
+    while True:
+        time.sleep(0.2)
+        with lock:
+            half = dm[3] // 2
+            upper, lower = dm[2] + half, dm[2] - half
+            if dm[0] > upper:
+                dm[4] = 1
+            elif dm[0] < lower:
+                dm[4] = 0
+            if dm[6] != last_d6:
+                last_d6, same_since = dm[6], time.time()
+            dm[7] = 1 if time.time() - same_since > 10 else 0
 
 
 def reply(conn, req, data=b""):
@@ -64,7 +82,6 @@ def serve(conn, addr):
                 with lock:
                     dm[start:start + count] = values
                 reply(conn, req)
-                print(f"  write D{start}..D{start + count - 1} = {list(values)}")
     except (ConnectionError, OSError):
         pass
     finally:
@@ -74,6 +91,7 @@ def serve(conn, addr):
 
 def main():
     threading.Thread(target=heartbeat, daemon=True).start()
+    threading.Thread(target=ladder, daemon=True).start()
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind((HOST, PORT))
